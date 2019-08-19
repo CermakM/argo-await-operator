@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 )
 
-
 // FormatJSON formats an object and returns JSON string
 func formatJSON(obj interface{}) string {
 	jsonified, err := json.Marshal(obj)

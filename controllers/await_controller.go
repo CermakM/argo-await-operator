@@ -76,25 +76,13 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	log.V(1).Info("found matching Workflow resource", "resource", wf)
 
 	resourceToAwait := res.Spec.Resource
+	observer := resource.NewObserverForResource(resourceToAwait, r.Config)
 
-	r.Log.V(1).Info("creating an observer")
-	observer := resource.NewObserverForResource(resourceToAwait)
+	// Await the requested Resource and then resume the Workflow
+	callback := r.resumeWorkflowCallback(wf)
+	go observer.AwaitResource(callback, resourceToAwait, req.Namespace, res.Spec.Filters)
 
-	_, err := observer.Get(instance.Spec.Resource.Name)
-	if err != nil {
-		// The Resource doesn't exist yet, create an observer for it
-		r.Log.V(1).Info("the awaited Resource was not found", "awaitAPIResourceource", awaitAPIResource)
-	}
-
-	if resourceToAwait != nil {
-		// Await the awaitAPIResourceource and awaitAPIResourceume the workflow when it appears
-		callback := r.resumeWorkflowCallback(wf)
-		go observer.AwaitResource(callback, resourceToAwait, req.Namespace, instance.Spec.Filters)
-
-		// Observer created successfully - don't requeue
-		return ctrl.Result{}, nil
-	}
-
+	// Observer created successfully - don't requeue
 	return ctrl.Result{}, nil
 }
 

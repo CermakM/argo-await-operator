@@ -1,4 +1,4 @@
-package controllers
+package common
 
 const (
 	// KubeConfigEnvVar defines the env variable KUBECONFIG which

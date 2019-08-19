@@ -3,7 +3,7 @@ package resource
 import (
 	"errors"
 
-	"github.com/cermakm/argo-await-operator/controllers"
+	"github.com/cermakm/argo-await-operator/common"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -28,7 +28,7 @@ func NewObserverForResource(res *metav1.APIResource, conf *rest.Config) *Observe
 	}
 	resourceClient := dynamicClient.Resource(gvr)
 
-	ns, err := controllers.GetOperatorNamespace()
+	ns, err := common.GetOperatorNamespace()
 	if err != nil {
 		log.Error(err, "Namespace must be provided to the Observer")
 	}
