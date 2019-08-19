@@ -17,8 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	wfv1alpha1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -63,16 +61,6 @@ type AwaitList struct {
 	Items           []Await `json:"items"`
 }
 
-// Workflow references Argo Workflow
-type Workflow struct {
-	wfv1alpha1.Workflow
-}
-
-// WorkflowList contains a list of Workflows
-type WorkflowList struct {
-	wfv1alpha1.WorkflowList
-}
-
 func init() {
-	SchemeBuilder.Register(&Await{}, &AwaitList{}, &Workflow{}, &WorkflowList{})
+	SchemeBuilder.Register(&Await{}, &AwaitList{})
 }

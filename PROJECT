@@ -1,6 +1,6 @@
 version: "2"
 domain: argoproj.io
-repo: github.com/cermakm
+repo: github.com/cermakm/argo-await-operator
 resources:
 - group: await
   version: v1alpha1

@@ -18,13 +18,19 @@ package controllers
 
 import (
 	"context"
+	"errors"
+
+	workflowv1alpha1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
+	argoprojv1alpha1 "github.com/argoproj/argo/pkg/client/clientset/versioned/typed/workflow/v1alpha1"
+	workflowutil "github.com/argoproj/argo/workflow/util"
 
 	v1alpha1 "github.com/cermakm/argo-await-operator/api/v1alpha1"
-	"github.com/cermakm/argo-await-operator/observers/resource"
+
+	// "github.com/cermakm/argo-await-operator/observers/resource"
 	"github.com/go-logr/logr"
 
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -44,13 +50,13 @@ type AwaitReconciler struct {
 
 func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	_ = context.Background()
-	_ = r.Log.WithValues("await", req.NamespacedName)
+	log := r.Log.WithValues("await", req)
 
 	// Fetch the Await instance
 	awaitResource := &v1alpha1.Await{}
 	err := r.Get(context.TODO(), req.NamespacedName, awaitResource)
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
 			// Return and don't requeue
@@ -60,73 +66,71 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	wf, err := r.getWorkflow(awaitResource.Spec.Workflow)
+	wf, err := r.SuspendedWorkflowResource(awaitResource.Spec.Workflow)
 	if err != nil {
-		r.Log.Error(err, "The requested Workflow was not found", "workflow", awaitResource.Spec.Workflow)
+		log.Error(err, "The requested Workflow was not found", "workflow", awaitResource.Spec.Workflow)
 
 		// The Workflow to be resumed does not exist anymore, don't reque
 		return ctrl.Result{}, nil
 	}
+	log.V(1).Info("Found matching Workflow resource", "resource", wf)
 
-	observer := resource.NewObserverForConfig(r.Config)
+	// observer := resource.NewObserverForConfig(r.Config)
 
-	resourceSpec := awaitResource.Spec.Resource
-	res, err := observer.Get(resourceSpec.Name)
-	if err != nil {
-		r.Log.Error(err, "The requested resource was not found", "resource", res)
+	// resourceSpec := awaitResource.Spec.Resource
+	// res, err := observer.Get(resourceSpec.Name)
+	// if err != nil {
+	// 	r.Log.Error(err, "The requested resource was not found", "resource", res)
 
-		return ctrl.Result{}, err
-	}
-	if res != nil {
-		// Await the resource and resume the workflow when it appears
-		go observer.AwaitResource(
-			r.resumeWorkflow(wf), res, req.Namespace, awaitResource.Spec.Filters)
+	// 	return ctrl.Result{}, err
+	// }
+	// if res != nil {
+	// 	// Await the resource and resume the workflow when it appears
+	// 	go observer.AwaitResource(
+	// 		r.resumeWorkflow(wf), res, req.Namespace, awaitResource.Spec.Filters)
 
-		// Observer created successfully - don't requeue
-		return ctrl.Result{}, nil
-	}
+	// 	// Observer created successfully - don't requeue
+	// 	return ctrl.Result{}, nil
+	// }
 
 	return ctrl.Result{}, nil
 }
 
+// SetupWithManager sets up the controller
 func (r *AwaitReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Await{}).
 		Complete(r)
 }
 
-// GetWorkflow retrieves the Workflow resource from the given namespace or dies
-func (r *AwaitReconciler) getWorkflow(workflow v1alpha1.NamespacedWorkflow) (*v1alpha1.Workflow, error) {
-	log := r.Log.WithValues(
-		"Workflow.Name", workflow.Name, "Workflow.Namespace", workflow.Namespace)
+// SuspendedWorkflowResource retrieves the Workflow resource from the given namespace which requested the await
+func (r *AwaitReconciler) SuspendedWorkflowResource(workflow v1alpha1.NamespacedWorkflow) (*workflowv1alpha1.Workflow, error) {
+	clientset := argoprojv1alpha1.NewForConfigOrDie(r.Config)
+	workflows := clientset.Workflows(workflow.Namespace)
 
-	res := &v1alpha1.Workflow{}
-	err := r.Get(
-		context.TODO(), types.NamespacedName{Name: res.Name, Namespace: workflow.Namespace}, res)
+	wf, err := workflows.Get(workflow.Name, metav1.GetOptions{})
 	if err != nil {
-		log.V(1).Error(err, "Error getting the Workflow Resource.")
-
-		if errors.IsNotFound(err) {
-			log.V(1).Error(err, "Workflow resource was not found.")
-		}
-
 		return nil, err
 	}
 
-	return res, nil
+	if workflowutil.IsWorkflowSuspended(wf) != true {
+		return nil, errors.New("workflow is not suspended")
+	}
+
+	return wf, nil
 }
 
-// ResumeWorkflow resumes a Workflow identified by its Name
-func (r *AwaitReconciler) resumeWorkflow(workflow *v1alpha1.Workflow) func() error {
-	resumeWorkflow := func() error {
+func (r *AwaitReconciler) resumeWorkflowCallback(workflow *workflowv1alpha1.Workflow) func() error {
+	f := func() error {
 		log := r.Log.WithValues(
 			"Workflow.Name", workflow.Name, "Workflow.Namespace", workflow.Namespace)
 		log.Info("Resuming workflow")
 
-		// TODO: Resume the workflow
+		clientset := argoprojv1alpha1.NewForConfigOrDie(r.Config)
+		workflows := clientset.Workflows(workflow.Namespace)
 
-		return nil
+		return workflowutil.ResumeWorkflow(workflows, workflow.Name)
 	}
 
-	return resumeWorkflow
+	return f
 }
