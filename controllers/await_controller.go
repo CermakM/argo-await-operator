@@ -19,11 +19,14 @@ package controllers
 import (
 	"context"
 
+	v1alpha1 "github.com/cermakm/api/v1alpha1"
 	"github.com/go-logr/logr"
+
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	awaitv1alpha1 "github.com/cermakm/api/v1alpha1"
 )
 
 // AwaitReconciler reconciles a Await object
@@ -46,6 +49,42 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 func (r *AwaitReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&awaitv1alpha1.Await{}).
+		For(&v1alpha1.Await{}).
 		Complete(r)
+}
+
+// GetWorkflow retrieves the Workflow resource from the given namespace or dies
+func (r *AwaitReconciler) getWorkflow(workflow v1alpha1.NamespacedWorkflow) (*v1alpha1.Workflow, error) {
+	log := r.Log.WithValues(
+		"Workflow.Name", workflow.Name, "Workflow.Namespace", workflow.Namespace)
+
+	res := &v1alpha1.Workflow{}
+	err := r.Get(
+		context.TODO(), types.NamespacedName{Name: res.Name, Namespace: workflow.Namespace}, res)
+	if err != nil {
+		log.Error(err, "Error getting the Workflow Resource.")
+
+		if errors.IsNotFound(err) {
+			log.Error(err, "Resource Workflow was not found.")
+		}
+
+		return nil, err
+	}
+
+	return res, nil
+}
+
+// ResumeWorkflow resumes a Workflow identified by its Name
+func (r *AwaitReconciler) resumeWorkflow(workflow *v1alpha1.Workflow) func() error {
+	resumeWorkflow := func() error {
+		log := r.Log.WithValues(
+			"Workflow.Name", workflow.Name, "Workflow.Namespace", workflow.Namespace)
+		log.Info("Resuming workflow")
+
+		// TODO: Resume the workflow
+
+		return nil
+	}
+
+	return resumeWorkflow
 }

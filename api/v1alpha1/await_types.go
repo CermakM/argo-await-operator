@@ -17,23 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
+	wfv1alpha1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// AwaitSpec defines the desired state of Await
-type AwaitSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-}
-
-// AwaitStatus defines the observed state of Await
-type AwaitStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-}
 
 // +kubebuilder:object:root=true
 
@@ -46,6 +33,27 @@ type Await struct {
 	Status AwaitStatus `json:"status,omitempty"`
 }
 
+// AwaitSpec defines the desired state of Await
+// +k8s:openapi-gen=true
+type AwaitSpec struct {
+	Workflow NamespacedWorkflow  `json:"workflow"`
+	Resource *metav1.APIResource `json:"resource"`
+	Filters  []string            `json:"filters,omitempty"`
+}
+
+// NamespacedWorkflow defines the workflow to be resumed
+type NamespacedWorkflow struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
+// AwaitStatus defines the observed state of Await
+// +k8s:openapi-gen=true
+type AwaitStatus struct {
+	StartedAt  metav1.Time `json:"startedAt,omitempty"`
+	FinishedAt metav1.Time `json:"finishedAt,omitempty"`
+}
+
 // +kubebuilder:object:root=true
 
 // AwaitList contains a list of Await
@@ -55,6 +63,16 @@ type AwaitList struct {
 	Items           []Await `json:"items"`
 }
 
+// Workflow references Argo Workflow
+type Workflow struct {
+	wfv1alpha1.Workflow
+}
+
+// WorkflowList contains a list of Workflows
+type WorkflowList struct {
+	wfv1alpha1.WorkflowList
+}
+
 func init() {
-	SchemeBuilder.Register(&Await{}, &AwaitList{})
+	SchemeBuilder.Register(&Await{}, &AwaitList{}, &Workflow{}, &WorkflowList{})
 }
