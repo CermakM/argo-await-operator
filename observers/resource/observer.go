@@ -28,9 +28,9 @@ func NewObserverForResource(res *metav1.APIResource, conf *rest.Config) *Observe
 	}
 	resourceClient := dynamicClient.Resource(gvr)
 
-	ns, err := common.GetOperatorNamespace()
+	ns, err := common.GetWatchNamespace()
 	if err != nil {
-		log.Error(err, "Namespace must be provided to the Observer")
+		panic(err)
 	}
 
 	return &Observer{
@@ -63,8 +63,8 @@ func (obs *Observer) Watch(opts metav1.ListOptions) (watch.Interface, error) {
 	return obs.client.Namespace(obs.namespace).Watch(opts)
 }
 
-// AwaitResource awaits a resource based on given filters
-func (obs *Observer) AwaitResource(callback func() error, res *metav1.APIResource, namespace string, filters []string) error {
+// Await awaits a resource based on given filters
+func (obs *Observer) Await(callback func() error, res *metav1.APIResource, namespace string, filters []string) error {
 	watchInterface, err := obs.Watch(metav1.ListOptions{})
 	if err != nil {
 		log.Error(err, "error watching resource")

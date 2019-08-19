@@ -80,7 +80,7 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	// Await the requested Resource and then resume the Workflow
 	callback := r.resumeWorkflowCallback(wf)
-	go observer.AwaitResource(callback, resourceToAwait, req.Namespace, res.Spec.Filters)
+	go observer.Await(callback, resourceToAwait, req.Namespace, res.Spec.Filters)
 
 	// Observer created successfully - don't requeue
 	return ctrl.Result{}, nil

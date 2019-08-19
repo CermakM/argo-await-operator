@@ -20,7 +20,6 @@ import (
 	"flag"
 	"os"
 
-	workflowv1alpha1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
 	v1alpha1 "github.com/cermakm/argo-await-operator/api/v1alpha1"
 	"github.com/cermakm/argo-await-operator/controllers"
 
@@ -40,8 +39,6 @@ var (
 func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 
-	// Argo Workflow API scheme
-	_ = workflowv1alpha1.AddToScheme(scheme)
 	// Await API scheme
 	_ = v1alpha1.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
