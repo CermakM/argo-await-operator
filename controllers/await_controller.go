@@ -19,11 +19,13 @@ package controllers
 import (
 	"context"
 
-	v1alpha1 "github.com/cermakm/api/v1alpha1"
+	v1alpha1 "github.com/cermakm/argo-await-operator/api/v1alpha1"
+	"github.com/cermakm/argo-await-operator/observers/resource"
 	"github.com/go-logr/logr"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,7 +34,9 @@ import (
 // AwaitReconciler reconciles a Await object
 type AwaitReconciler struct {
 	client.Client
-	Log logr.Logger
+
+	Log    logr.Logger
+	Config *rest.Config
 }
 
 // +kubebuilder:rbac:groups=await.argoproj.io,resources=awaits,verbs=get;list;watch;create;update;patch;delete
@@ -42,7 +46,45 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	_ = context.Background()
 	_ = r.Log.WithValues("await", req.NamespacedName)
 
-	// your logic here
+	// Fetch the Await instance
+	awaitResource := &v1alpha1.Await{}
+	err := r.Get(context.TODO(), req.NamespacedName, awaitResource)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return ctrl.Result{}, nil
+		}
+		// Error reading the object - requeue the request.
+		return ctrl.Result{}, err
+	}
+
+	wf, err := r.getWorkflow(awaitResource.Spec.Workflow)
+	if err != nil {
+		r.Log.Error(err, "The requested Workflow was not found", "workflow", awaitResource.Spec.Workflow)
+
+		// The Workflow to be resumed does not exist anymore, don't reque
+		return ctrl.Result{}, nil
+	}
+
+	observer := resource.NewObserverForConfig(r.Config)
+
+	resourceSpec := awaitResource.Spec.Resource
+	res, err := observer.Get(resourceSpec.Name)
+	if err != nil {
+		r.Log.Error(err, "The requested resource was not found", "resource", res)
+
+		return ctrl.Result{}, err
+	}
+	if res != nil {
+		// Await the resource and resume the workflow when it appears
+		go observer.AwaitResource(
+			r.resumeWorkflow(wf), res, req.Namespace, awaitResource.Spec.Filters)
+
+		// Observer created successfully - don't requeue
+		return ctrl.Result{}, nil
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -62,10 +104,10 @@ func (r *AwaitReconciler) getWorkflow(workflow v1alpha1.NamespacedWorkflow) (*v1
 	err := r.Get(
 		context.TODO(), types.NamespacedName{Name: res.Name, Namespace: workflow.Namespace}, res)
 	if err != nil {
-		log.Error(err, "Error getting the Workflow Resource.")
+		log.V(1).Error(err, "Error getting the Workflow Resource.")
 
 		if errors.IsNotFound(err) {
-			log.Error(err, "Resource Workflow was not found.")
+			log.V(1).Error(err, "Workflow resource was not found.")
 		}
 
 		return nil, err

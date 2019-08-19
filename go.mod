@@ -1,4 +1,4 @@
-module github.com/cermakm
+module github.com/cermakm/argo-await-operator
 
 go 1.12
 
