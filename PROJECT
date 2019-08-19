@@ -1,3 +1,7 @@
 version: "2"
 domain: argoproj.io
 repo: github.com/cermakm
+resources:
+- group: await
+  version: v1alpha1
+  kind: Await

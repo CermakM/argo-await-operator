@@ -1,0 +1,7 @@
+apiVersion: await.argoproj.io/v1alpha1
+kind: Await
+metadata:
+  name: await-sample
+spec:
+  # Add fields here
+  foo: bar
