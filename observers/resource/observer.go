@@ -7,6 +7,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -17,10 +18,14 @@ import (
 var log = logf.Log.WithName("observer")
 
 // NewObserverForResource create a new ResourceObserver from kubernetes config
-func NewObserverForResource(conf *rest.Config, res *metav1.APIResource) *Observer {
+func NewObserverForResource(res *metav1.APIResource, conf *rest.Config) *Observer {
 	dynamicClient := dynamic.NewForConfigOrDie(conf)
 
-	gvr := GroupVersionResourceForAPIResource(res)
+	gvr := schema.GroupVersionResource{
+		Group:    res.Group,
+		Version:  res.Version,
+		Resource: res.Name,
+	}
 	resourceClient := dynamicClient.Resource(gvr)
 
 	ns, err := controllers.GetOperatorNamespace()

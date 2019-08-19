@@ -26,7 +26,7 @@ import (
 
 	v1alpha1 "github.com/cermakm/argo-await-operator/api/v1alpha1"
 
-	// "github.com/cermakm/argo-await-operator/observers/resource"
+	"github.com/cermakm/argo-await-operator/observers/resource"
 	"github.com/go-logr/logr"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -53,8 +53,8 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("await", req)
 
 	// Fetch the Await instance
-	awaitResource := &v1alpha1.Await{}
-	err := r.Get(context.TODO(), req.NamespacedName, awaitResource)
+	res := &v1alpha1.Await{}
+	err := r.Get(context.TODO(), req.NamespacedName, res)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
@@ -66,41 +66,36 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	wf, err := r.SuspendedWorkflowResource(awaitResource.Spec.Workflow)
+	wf, err := r.SuspendedWorkflowResource(res.Spec.Workflow)
 	if err != nil {
-		log.Error(err, "The requested Workflow was not found", "workflow", awaitResource.Spec.Workflow)
+		log.Error(err, "the requested Workflow was not found", "workflow", res.Spec.Workflow)
 
 		// The Workflow to be resumed does not exist anymore, don't reque
 		return ctrl.Result{}, nil
 	}
-	log.V(1).Info("Found matching Workflow resource", "resource", wf)
+	log.V(1).Info("found matching Workflow resource", "resource", wf)
 
-	// observer := resource.NewObserverForConfig(r.Config)
+	resourceToAwait := res.Spec.Resource
 
-	// resourceSpec := awaitResource.Spec.Resource
-	// res, err := observer.Get(resourceSpec.Name)
-	// if err != nil {
-	// 	r.Log.Error(err, "The requested resource was not found", "resource", res)
+	r.Log.V(1).Info("creating an observer")
+	observer := resource.NewObserverForResource(resourceToAwait)
 
-	// 	return ctrl.Result{}, err
-	// }
-	// if res != nil {
-	// 	// Await the resource and resume the workflow when it appears
-	// 	go observer.AwaitResource(
-	// 		r.resumeWorkflow(wf), res, req.Namespace, awaitResource.Spec.Filters)
+	_, err := observer.Get(instance.Spec.Resource.Name)
+	if err != nil {
+		// The Resource doesn't exist yet, create an observer for it
+		r.Log.V(1).Info("the awaited Resource was not found", "awaitAPIResourceource", awaitAPIResource)
+	}
 
-	// 	// Observer created successfully - don't requeue
-	// 	return ctrl.Result{}, nil
-	// }
+	if resourceToAwait != nil {
+		// Await the awaitAPIResourceource and awaitAPIResourceume the workflow when it appears
+		callback := r.resumeWorkflowCallback(wf)
+		go observer.AwaitResource(callback, resourceToAwait, req.Namespace, instance.Spec.Filters)
+
+		// Observer created successfully - don't requeue
+		return ctrl.Result{}, nil
+	}
 
 	return ctrl.Result{}, nil
-}
-
-// SetupWithManager sets up the controller
-func (r *AwaitReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.Await{}).
-		Complete(r)
 }
 
 // SuspendedWorkflowResource retrieves the Workflow resource from the given namespace which requested the await
@@ -133,4 +128,11 @@ func (r *AwaitReconciler) resumeWorkflowCallback(workflow *workflowv1alpha1.Work
 	}
 
 	return f
+}
+
+// SetupWithManager sets up the controller
+func (r *AwaitReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&v1alpha1.Await{}).
+		Complete(r)
 }
