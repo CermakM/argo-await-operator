@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -25,40 +24,10 @@ type Observer struct {
 	client dynamic.NamespaceableResourceInterface
 
 	namespace string
-	resource  *metav1.APIResource
+	resource  *v1alpha1.Resource
 	filters   []string
 
 	K8RestConfig *rest.Config
-}
-
-func discoverResources(disco discovery.DiscoveryInterface, obj *v1alpha1.Resource) (*metav1.APIResourceList, error) {
-	gv := schema.GroupVersion{
-		Group:   obj.Group,
-		Version: obj.Version,
-	}
-	groupVersion := gv.String()
-
-	return disco.ServerResourcesForGroupVersion(groupVersion)
-}
-
-func serverResourceForName(resourceInterfaces *metav1.APIResourceList, name string) (*metav1.APIResource, error) {
-	for i := range resourceInterfaces.APIResources {
-		apiResource := resourceInterfaces.APIResources[i]
-		if apiResource.Name == name {
-			return &apiResource, nil
-		}
-	}
-	return nil, fmt.Errorf("no resource found of name '%s'", name)
-}
-
-func serverResourceForGVK(resourceInterfaces *metav1.APIResourceList, kind string) (*metav1.APIResource, error) {
-	for i := range resourceInterfaces.APIResources {
-		apiResource := resourceInterfaces.APIResources[i]
-		if apiResource.Kind == kind {
-			return &apiResource, nil
-		}
-	}
-	return nil, fmt.Errorf("no resource found of kind '%s'", kind)
 }
 
 // Get retrieves resources from the Observer's namespace
@@ -128,27 +97,11 @@ func (obs *Observer) Await(callback func() error) error {
 }
 
 // NewObserverForResource create a new ResourceObserver from kubernetes config
-func NewObserverForResource(conf *rest.Config, obj *v1alpha1.Resource, filters []string) (*Observer, error) {
+func NewObserverForResource(conf *rest.Config, res *v1alpha1.Resource, filters []string) (*Observer, error) {
 	ns, err := common.GetWatchNamespace()
 	if err != nil {
 		panic(err)
 	}
-
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(conf)
-	if err != nil {
-		return nil, err
-	}
-	apiList, err := discoverResources(discoveryClient, obj)
-
-	res, err := serverResourceForName(apiList, obj.Name)
-	if err != nil {
-		return nil, err
-	}
-	// discovery client leaves the following blank in favor of apiList spec
-	res.Group = apiList.APIVersion
-	res.Version = apiList.GroupVersion
-
-	log.V(1).Info("discovered resource", "resource", *res)
 
 	gvr := schema.GroupVersionResource{
 		Group:    res.Group,
