@@ -18,7 +18,6 @@ package controllers
 
 import (
 	"context"
-	"fmt"
 
 	workflowv1alpha1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
 	argoprojv1alpha1 "github.com/argoproj/argo/pkg/client/clientset/versioned/typed/workflow/v1alpha1"
@@ -50,7 +49,7 @@ type AwaitReconciler struct {
 
 func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	_ = context.Background()
-	log := r.Log.WithValues("await", req)
+	log := r.Log.WithValues("request", req)
 
 	// Fetch the Await instance
 	res := &v1alpha1.Await{}
@@ -66,7 +65,7 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	wf, err := r.WorkflowResource(res.Spec.Workflow)
+	wf, err := r.getWorkflowResource(res.Spec.Workflow)
 	if err != nil {
 		log.Error(err, "the requested Workflow was not found", "workflow", res.Spec.Workflow)
 
@@ -75,9 +74,10 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	}
 
 	if workflowutil.IsWorkflowSuspended(wf) != true {
-		// The Workflow exists, but is not suspended (possibly yet), reque
-		log.Info("workflow is not suspended, reconciling", "status", wf.Status)
+		status := getWorkflowStatus(wf)
+		log.Info("workflow is not suspended, reconciling", "status", status)
 
+		// The Workflow exists, but is not suspended (possibly yet), reque
 		return ctrl.Result{}, nil
 	}
 
@@ -88,15 +88,42 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	}
 
 	// Await the requested Resource and then resume the Workflow
-	callback := r.resumeWorkflowCallback(wf)
+	callback := r.workflowResumeCallback(wf)
 	go observer.Await(callback)
 
 	// Observer created successfully - don't requeue
 	return ctrl.Result{}, nil
 }
 
-// WorkflowResource retrieves the Workflow resource from the given namespace which requested the await
-func (r *AwaitReconciler) WorkflowResource(workflow v1alpha1.NamespacedWorkflow) (*workflowv1alpha1.Workflow, error) {
+type workflowStatus struct {
+	Phase workflowv1alpha1.NodePhase `json:"phase"`
+	Nodes []nodeStatus               `json:"nodes"`
+}
+
+type nodeStatus struct {
+	// Name is unique name in the node tree used to generate the node ID
+	Name  string                     `json:"name"`
+	Type  workflowv1alpha1.NodeType  `json:"type"`
+	Phase workflowv1alpha1.NodePhase `json:"phase"`
+}
+
+func getWorkflowStatus(workflow *workflowv1alpha1.Workflow) *workflowStatus {
+	status := &workflowStatus{Phase: workflow.Status.Phase}
+
+	for _, node := range workflow.Status.Nodes {
+		ns := nodeStatus{
+			Name:  node.Name,
+			Type:  node.Type,
+			Phase: node.Phase,
+		}
+		status.Nodes = append(status.Nodes, ns)
+	}
+
+	return status
+}
+
+// getWorkflowResource retrieves the Workflow resource from the given namespace which requested the await
+func (r *AwaitReconciler) getWorkflowResource(workflow v1alpha1.NamespacedWorkflow) (*workflowv1alpha1.Workflow, error) {
 	clientset := argoprojv1alpha1.NewForConfigOrDie(r.Config)
 	workflows := clientset.Workflows(workflow.Namespace)
 
@@ -108,7 +135,9 @@ func (r *AwaitReconciler) WorkflowResource(workflow v1alpha1.NamespacedWorkflow)
 	return wf, nil
 }
 
-func (r *AwaitReconciler) resumeWorkflowCallback(workflow *workflowv1alpha1.Workflow) func() error {
+// workflowResumeCallback returns the callback function
+// which should be run after the resource has been awaited
+func (r *AwaitReconciler) workflowResumeCallback(workflow *workflowv1alpha1.Workflow) func() error {
 	f := func() error {
 		log := r.Log.WithValues(
 			"Workflow.Name", workflow.Name, "Workflow.Namespace", workflow.Namespace)
