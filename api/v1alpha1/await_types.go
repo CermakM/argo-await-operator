@@ -34,12 +34,23 @@ type Await struct {
 // AwaitSpec defines the desired state of Await
 // +k8s:openapi-gen=true
 type AwaitSpec struct {
-	Workflow NamespacedWorkflow  `json:"workflow"`
-	Resource *metav1.APIResource `json:"resource"`
-	Filters  []string            `json:"filters,omitempty"`
+	Workflow NamespacedWorkflow `json:"workflow"`
+	Resource Resource           `json:"resource"`
+	Filters  []string           `json:"filters,omitempty"`
+}
+
+// Resource defines the Resource to be awaited
+// +k8s:openapi-gen=true
+type Resource struct {
+	// name is the plural name of the resource.
+	Name    string `json:"name" protobuf:"bytes,1,opt,name=name"`
+	Group   string `json:"group,omitempty" protobuf:"bytes,8,opt,name=group"`
+	Version string `json:"version,omitempty" protobuf:"bytes,9,opt,name=version"`
+	Kind    string `json:"kind" protobuf:"bytes,3,opt,name=kind"`
 }
 
 // NamespacedWorkflow defines the workflow to be resumed
+// +k8s:openapi-gen=true
 type NamespacedWorkflow struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`

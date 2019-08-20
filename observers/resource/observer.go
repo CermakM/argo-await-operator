@@ -1,14 +1,16 @@
 package resource
 
 import (
-	"errors"
+	"fmt"
 
+	v1alpha1 "github.com/cermakm/argo-await-operator/api/v1alpha1"
 	"github.com/cermakm/argo-await-operator/common"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -17,35 +19,45 @@ import (
 
 var log = logf.Log.WithName("observer")
 
-// NewObserverForResource create a new ResourceObserver from kubernetes config
-func NewObserverForResource(res *metav1.APIResource, conf *rest.Config) *Observer {
-	dynamicClient := dynamic.NewForConfigOrDie(conf)
-
-	gvr := schema.GroupVersionResource{
-		Group:    res.Group,
-		Version:  res.Version,
-		Resource: res.Name,
-	}
-	resourceClient := dynamicClient.Resource(gvr)
-
-	ns, err := common.GetWatchNamespace()
-	if err != nil {
-		panic(err)
-	}
-
-	return &Observer{
-		client:       resourceClient,
-		namespace:    ns,
-		K8RestConfig: conf,
-	}
-}
-
 // Observer watches for specified resources
 type Observer struct {
-	client    dynamic.NamespaceableResourceInterface
+	client dynamic.NamespaceableResourceInterface
+
 	namespace string
+	resource  *metav1.APIResource
+	filters   []string
 
 	K8RestConfig *rest.Config
+}
+
+func discoverResources(disco discovery.DiscoveryInterface, obj *v1alpha1.Resource) (*metav1.APIResourceList, error) {
+	gv := schema.GroupVersion{
+		Group:   obj.Group,
+		Version: obj.Version,
+	}
+	groupVersion := gv.String()
+
+	return disco.ServerResourcesForGroupVersion(groupVersion)
+}
+
+func serverResourceForName(resourceInterfaces *metav1.APIResourceList, name string) (*metav1.APIResource, error) {
+	for i := range resourceInterfaces.APIResources {
+		apiResource := resourceInterfaces.APIResources[i]
+		if apiResource.Name == name {
+			return &apiResource, nil
+		}
+	}
+	return nil, fmt.Errorf("no resource found of name '%s'", name)
+}
+
+func serverResourceForGVK(resourceInterfaces *metav1.APIResourceList, kind string) (*metav1.APIResource, error) {
+	for i := range resourceInterfaces.APIResources {
+		apiResource := resourceInterfaces.APIResources[i]
+		if apiResource.Kind == kind {
+			return &apiResource, nil
+		}
+	}
+	return nil, fmt.Errorf("no resource found of kind '%s'", kind)
 }
 
 // Get retrieves resources from the Observer's namespace
@@ -64,17 +76,17 @@ func (obs *Observer) Watch(opts metav1.ListOptions) (watch.Interface, error) {
 }
 
 // Await awaits a resource based on given filters
-func (obs *Observer) Await(callback func() error, res *metav1.APIResource, namespace string, filters []string) error {
+func (obs *Observer) Await(callback func() error) error {
 	watchInterface, err := obs.Watch(metav1.ListOptions{})
 	if err != nil {
-		log.Error(err, "error watching resource")
+		log.Error(err, "error creating a watch for resource", "resource", *obs.resource)
 		panic(err)
 	}
 
 	log.WithValues(
-		"group", res.Group,
-		"version", res.Version,
-		"kind", res.Kind,
+		"group", obs.resource.Group,
+		"version", obs.resource.Version,
+		"kind", obs.resource.Kind,
 	).Info("watching for resources")
 	for {
 		select {
@@ -83,22 +95,20 @@ func (obs *Observer) Await(callback func() error, res *metav1.APIResource, names
 				"type", item.Type,
 				"resource", item.Object.GetObjectKind().GroupVersionKind(),
 			)
-			log.V(1).Info("new resource received")
-			log.V(2).Info("data: ", "data", item)
+			log.V(1).Info("new event received")
+			log.V(1).Info("event", item)
 
 			gvk := item.Object.GetObjectKind().GroupVersionKind()
-			if res.Kind != gvk.Kind {
-				log.Info("resource does not match required kind: ", "kind", res.Kind)
+			if obs.resource.Kind != gvk.Kind {
+				log.Info("resource does not match required kind: ", "kind", obs.resource.Kind)
 				continue
 			}
 
-			log.V(1).Info("applying filters: ", "filters", filters)
+			log.V(1).Info("applying filters: ", "filters", obs.filters)
 
-			if ok, err := passFilters(&item, filters...); ok == false {
+			if ok, err := passFilters(&item, obs.filters...); ok == false {
 				if err != nil {
-					log.Error(err, "an error occured during parsing")
-
-					return errors.New("Unable to parse resource filters")
+					return fmt.Errorf("Unable to parse resource filters")
 				}
 
 				log.Info("resource dit not pass the filters")
@@ -111,4 +121,43 @@ func (obs *Observer) Await(callback func() error, res *metav1.APIResource, names
 			return callback()
 		}
 	}
+}
+
+// NewObserverForResource create a new ResourceObserver from kubernetes config
+func NewObserverForResource(conf *rest.Config, obj *v1alpha1.Resource, filters []string) (*Observer, error) {
+	ns, err := common.GetWatchNamespace()
+	if err != nil {
+		panic(err)
+	}
+
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(conf)
+	if err != nil {
+		return nil, err
+	}
+	apiList, err := discoverResources(discoveryClient, obj)
+
+	res, err := serverResourceForName(apiList, obj.Name)
+	if err != nil {
+		return nil, err
+	}
+	// discovery client leaves the following blank in favor of apiList spec
+	res.Group = apiList.APIVersion
+	res.Version = apiList.GroupVersion
+
+	log.V(1).Info("discovered resource", "resource", *res)
+
+	gvr := schema.GroupVersionResource{
+		Group:    res.Group,
+		Version:  res.Version,
+		Resource: res.Name,
+	}
+	resourceClient := dynamic.NewForConfigOrDie(conf).Resource(gvr)
+
+	return &Observer{
+		client:       resourceClient,
+		namespace:    ns,
+		resource:     res,
+		filters:      filters,
+		K8RestConfig: conf,
+	}, nil
 }

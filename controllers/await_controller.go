@@ -18,7 +18,7 @@ package controllers
 
 import (
 	"context"
-	"errors"
+	"fmt"
 
 	workflowv1alpha1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
 	argoprojv1alpha1 "github.com/argoproj/argo/pkg/client/clientset/versioned/typed/workflow/v1alpha1"
@@ -66,38 +66,41 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	wf, err := r.SuspendedWorkflowResource(res.Spec.Workflow)
+	wf, err := r.WorkflowResource(res.Spec.Workflow)
 	if err != nil {
 		log.Error(err, "the requested Workflow was not found", "workflow", res.Spec.Workflow)
 
-		// The Workflow to be resumed does not exist anymore, don't reque
-		return ctrl.Result{}, nil
+		// The Workflow to be resumed does not exist, don't reque
+		return ctrl.Result{Requeue: false}, err
 	}
-	log.V(1).Info("found matching Workflow resource", "resource", wf)
 
-	resourceToAwait := res.Spec.Resource
-	observer := resource.NewObserverForResource(resourceToAwait, r.Config)
+	if workflowutil.IsWorkflowSuspended(wf) != true {
+		// The Workflow exists, but is not suspended (possibly yet), reque
+		return ctrl.Result{}, fmt.Errorf("workflow is not suspended")
+	}
+
+	observer, err := resource.NewObserverForResource(r.Config, &res.Spec.Resource, res.Spec.Filters)
+	if err != nil {
+		log.Error(err, "observer could not be created")
+		return ctrl.Result{Requeue: false}, err
+	}
 
 	// Await the requested Resource and then resume the Workflow
 	callback := r.resumeWorkflowCallback(wf)
-	go observer.Await(callback, resourceToAwait, req.Namespace, res.Spec.Filters)
+	go observer.Await(callback)
 
 	// Observer created successfully - don't requeue
 	return ctrl.Result{}, nil
 }
 
-// SuspendedWorkflowResource retrieves the Workflow resource from the given namespace which requested the await
-func (r *AwaitReconciler) SuspendedWorkflowResource(workflow v1alpha1.NamespacedWorkflow) (*workflowv1alpha1.Workflow, error) {
+// WorkflowResource retrieves the Workflow resource from the given namespace which requested the await
+func (r *AwaitReconciler) WorkflowResource(workflow v1alpha1.NamespacedWorkflow) (*workflowv1alpha1.Workflow, error) {
 	clientset := argoprojv1alpha1.NewForConfigOrDie(r.Config)
 	workflows := clientset.Workflows(workflow.Namespace)
 
 	wf, err := workflows.Get(workflow.Name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
-	}
-
-	if workflowutil.IsWorkflowSuspended(wf) != true {
-		return nil, errors.New("workflow is not suspended")
 	}
 
 	return wf, nil
@@ -107,12 +110,18 @@ func (r *AwaitReconciler) resumeWorkflowCallback(workflow *workflowv1alpha1.Work
 	f := func() error {
 		log := r.Log.WithValues(
 			"Workflow.Name", workflow.Name, "Workflow.Namespace", workflow.Namespace)
-		log.Info("Resuming workflow")
+		log.Info("resuming workflow")
 
 		clientset := argoprojv1alpha1.NewForConfigOrDie(r.Config)
 		workflows := clientset.Workflows(workflow.Namespace)
 
-		return workflowutil.ResumeWorkflow(workflows, workflow.Name)
+		err := workflowutil.ResumeWorkflow(workflows, workflow.Name)
+		if err != nil {
+			log.Error(err, "failed to resume workflow")
+			return err
+		}
+
+		log.Info("workflow successfully resumed.")
 	}
 
 	return f
