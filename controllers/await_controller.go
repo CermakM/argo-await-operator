@@ -76,7 +76,9 @@ func (r *AwaitReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	if workflowutil.IsWorkflowSuspended(wf) != true {
 		// The Workflow exists, but is not suspended (possibly yet), reque
-		return ctrl.Result{}, fmt.Errorf("workflow is not suspended")
+		log.Info("workflow is not suspended, reconciling", "status", wf.Status)
+
+		return ctrl.Result{}, nil
 	}
 
 	observer, err := resource.NewObserverForResource(r.Config, &res.Spec.Resource, res.Spec.Filters)
@@ -122,6 +124,7 @@ func (r *AwaitReconciler) resumeWorkflowCallback(workflow *workflowv1alpha1.Work
 		}
 
 		log.Info("workflow successfully resumed.")
+		return nil
 	}
 
 	return f

@@ -2,16 +2,13 @@ package resource
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	gjson "github.com/tidwall/gjson"
-
-	"k8s.io/apimachinery/pkg/watch"
 )
 
-// FormatJSON formats an object and returns JSON string
-func formatJSON(obj interface{}) string {
+// unstructuredToJSON formats an object and returns JSON string
+func unstructuredToJSON(obj interface{}) string {
 	jsonified, err := json.Marshal(obj)
 	if err != nil {
 		panic(err)
@@ -20,17 +17,19 @@ func formatJSON(obj interface{}) string {
 	return string(jsonified)
 }
 
-func passFilters(evt *watch.Event, filters ...string) (bool, error) {
-	eventJSON := formatJSON([]watch.Event{*evt})
+func passFilters(object map[string]interface{}, filters ...string) (bool, error) {
+	resourceJSON := unstructuredToJSON([]interface{}{object})
 
-	if !gjson.Valid(eventJSON) {
-		return false, errors.New("failed parsing event: invalid json")
+	if !gjson.Valid(resourceJSON) {
+		return false, fmt.Errorf("failed to parse the resource: invalid json")
 	}
 
-	for _, f := range filters {
-		// filter needs to wrapped
-		wrappedFilter := fmt.Sprintf("#(%s)", f)
-		validResource := gjson.Get(eventJSON, wrappedFilter)
+	for _, filter := range filters {
+		log.V(1).Info("applying filter", "filter", filter)
+
+		// filter needs to wrapped in order to use comparison operator
+		wrappedFilter := fmt.Sprintf("#(%s)", filter)
+		validResource := gjson.Get(resourceJSON, wrappedFilter)
 
 		if !validResource.Exists() {
 			return false, nil

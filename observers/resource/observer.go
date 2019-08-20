@@ -8,6 +8,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
@@ -95,8 +96,7 @@ func (obs *Observer) Await(callback func() error) error {
 				"type", item.Type,
 				"resource", item.Object.GetObjectKind().GroupVersionKind(),
 			)
-			log.V(1).Info("new event received")
-			log.V(1).Info("event", item)
+			log.V(1).Info("new event received", "event", item)
 
 			gvk := item.Object.GetObjectKind().GroupVersionKind()
 			if obs.resource.Kind != gvk.Kind {
@@ -104,9 +104,13 @@ func (obs *Observer) Await(callback func() error) error {
 				continue
 			}
 
-			log.V(1).Info("applying filters: ", "filters", obs.filters)
+			unstructured, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item.Object)
+			if err != nil {
+				log.Error(err, "Unable to convert runtime object to unstructured")
+				continue
+			}
 
-			if ok, err := passFilters(&item, obs.filters...); ok == false {
+			if ok, err := passFilters(unstructured, obs.filters...); ok == false {
 				if err != nil {
 					return fmt.Errorf("Unable to parse resource filters")
 				}
