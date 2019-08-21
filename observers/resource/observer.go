@@ -60,20 +60,21 @@ func (obs *Observer) Await(callback func() error) error {
 	).Info("watching for resources")
 	for {
 		select {
-		case item := <-watchInterface.ResultChan():
+		case evt := <-watchInterface.ResultChan():
 			log := log.WithValues(
-				"type", item.Type,
-				"resource", item.Object.GetObjectKind().GroupVersionKind(),
+				"type", evt.Type,
+				"resource", evt.Object.GetObjectKind().GroupVersionKind(),
 			)
-			log.V(1).Info("new event received", "event", item)
+			log.Info("new event received")
+			log.V(2).Info("received event", "event", evt)
 
-			gvk := item.Object.GetObjectKind().GroupVersionKind()
+			gvk := evt.Object.GetObjectKind().GroupVersionKind()
 			if obs.resource.Kind != gvk.Kind {
 				log.Info("resource does not match required kind: ", "kind", obs.resource.Kind)
 				continue
 			}
 
-			unstructured, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item.Object)
+			unstructured, err := runtime.DefaultUnstructuredConverter.ToUnstructured(evt.Object)
 			if err != nil {
 				log.Error(err, "Unable to convert runtime object to unstructured")
 				continue
