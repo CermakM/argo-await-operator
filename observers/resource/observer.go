@@ -57,6 +57,7 @@ func (obs *Observer) Await(callback func() error) error {
 		"group", obs.resource.Group,
 		"version", obs.resource.Version,
 		"kind", obs.resource.Kind,
+		"namespace", obs.namespace,
 	).Info("watching for resources")
 	for {
 		select {
